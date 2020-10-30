@@ -52,6 +52,8 @@ public class SendingReceivingClient {
             SSLContext sslContext = null;
             if (this.sslContextService != null) {
                 sslContext = this.sslContextService.createSSLContext(SSLContextService.ClientAuth.REQUIRED);
+            } else {
+            	sslContext = SSLContext.getDefault();
             }
             
             this.sslSocket = (SSLSocket) sslContext.getSocketFactory().createSocket(this.host, this.port);   
