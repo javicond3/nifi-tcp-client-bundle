@@ -5,6 +5,7 @@ import java.io.BufferedOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.net.SocketTimeoutException;
 import java.util.Arrays;
 
 import javax.net.ssl.SSLContext;
@@ -26,7 +27,8 @@ public class SendingReceivingClient {
 	
 	private final String host;
 	private final int port;
-  	private final String credentials;
+  	private final String customText;
+  	private final int readSecondsTimeout;
   	private final Relationship REL_SUCCESS;
   	private final ProcessSessionFactory sessionFactory;
   	private final SSLContextService sslContextService;
@@ -34,11 +36,12 @@ public class SendingReceivingClient {
   	private volatile SSLSocket sslSocket;
   	private Thread threadClient; 
   	
-  	
-  	public SendingReceivingClient(String host, int port, String credentials, Relationship REL_SUCCESS, ProcessSessionFactory sessionFactory, SSLContextService sslContextService, MessageHandler delegatingMessageHandler) {
+  	public SendingReceivingClient(String host, int port, String customText, int readSecondsTimeout,
+  			Relationship REL_SUCCESS, ProcessSessionFactory sessionFactory, SSLContextService sslContextService, MessageHandler delegatingMessageHandler) {
   		this.host = host;
   		this.port = port;
-  		this.credentials = credentials;
+  		this.customText = customText;
+  		this.readSecondsTimeout = readSecondsTimeout;
   		this.REL_SUCCESS = REL_SUCCESS;
   		this.sessionFactory = sessionFactory;
   		this.sslContextService = sslContextService;
@@ -47,8 +50,7 @@ public class SendingReceivingClient {
   	
   	// connect to server
     private void init() {
-        try {
-                       
+        try {        
             SSLContext sslContext = null;
             if (this.sslContextService != null) {
                 sslContext = this.sslContextService.createSSLContext(SSLContextService.ClientAuth.REQUIRED);
@@ -58,6 +60,10 @@ public class SendingReceivingClient {
             
             this.sslSocket = (SSLSocket) sslContext.getSocketFactory().createSocket(this.host, this.port);   
             this.sslSocket.setNeedClientAuth(false);
+            if (this.readSecondsTimeout > 0) {
+                this.sslSocket.setSoTimeout(this.readSecondsTimeout * 1000);
+            }
+
             
         } catch (Exception e) {
         	logger.error("Socket init error", e);
@@ -70,30 +76,37 @@ public class SendingReceivingClient {
         	logger.error("Socket not initialized");
             return;
         }
-        try {
+        try { 
             InputStream inputStream = this.sslSocket.getInputStream();
             OutputStream outputStream = this.sslSocket.getOutputStream();
 
             BufferedInputStream bufferedInputStream = new BufferedInputStream(inputStream);
             BufferedOutputStream bufferedOutputStream = new BufferedOutputStream(outputStream);
 
-            bufferedOutputStream.write((this.credentials.toString()+"\r\n").getBytes());
-            bufferedOutputStream.flush();
+            bufferedOutputStream.write((this.customText.toString()+"\r\n").getBytes());
+            bufferedOutputStream.flush(); 
             while (true && !this.sslSocket.isClosed()) {
                 byte[] buffer = new byte[40];
-                int bytesRead = bufferedInputStream.read(buffer);
-                buffer = Arrays.copyOfRange(buffer, 0, bytesRead);
-                delegatingMessageHandler.byteArrayInput = ArrayUtils.addAll(delegatingMessageHandler.byteArrayInput, buffer);
-                if(bytesRead < 0) {
-                	this.stop();
-                	return;
-                }
-                byte[] packet = null;
-                while((packet = this.delegatingMessageHandler.popFromByteArray()) != null) {
-                	String jsonString = this.delegatingMessageHandler.unGunzipFile(packet); 
-                    this.handle(jsonString);
-                    
-                }
+                
+                try {
+                	 int bytesRead = bufferedInputStream.read(buffer);
+                	 buffer = Arrays.copyOfRange(buffer, 0, bytesRead);
+                     delegatingMessageHandler.byteArrayInput = ArrayUtils.addAll(delegatingMessageHandler.byteArrayInput, buffer);
+                     if(bytesRead < 0) {
+                     	this.stop();
+                     	return;
+                     }
+                     byte[] packet = null;
+                     while((packet = this.delegatingMessageHandler.popFromByteArray()) != null) {
+                     	String jsonString = this.delegatingMessageHandler.unGunzipFile(packet); 
+                         this.handle(jsonString);
+                         
+                     }
+                } catch (SocketTimeoutException e) {
+			           logger.error("Socket timed out", e);
+			           this.stop();
+			           return;
+			   }
             }
         } catch (IOException e) {
         	logger.error("Socket process error", e);
@@ -146,8 +159,5 @@ public class SendingReceivingClient {
         session.transfer(flowFile, REL_SUCCESS);
         session.commit();
     }
-    
-
-
-
+  
 }

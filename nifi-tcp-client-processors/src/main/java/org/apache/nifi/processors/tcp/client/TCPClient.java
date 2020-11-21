@@ -22,6 +22,7 @@ import org.apache.nifi.annotation.behavior.ReadsAttribute;
 import org.apache.nifi.annotation.behavior.ReadsAttributes;
 import org.apache.nifi.annotation.behavior.WritesAttribute;
 import org.apache.nifi.annotation.behavior.WritesAttributes;
+import org.apache.nifi.annotation.configuration.DefaultSchedule;
 import org.apache.nifi.annotation.lifecycle.OnScheduled;
 import org.apache.nifi.annotation.lifecycle.OnStopped;
 import org.apache.nifi.annotation.documentation.CapabilityDescription;
@@ -34,6 +35,7 @@ import org.apache.nifi.processor.ProcessContext;
 import org.apache.nifi.processor.ProcessSessionFactory;
 import org.apache.nifi.processor.Relationship;
 import org.apache.nifi.processor.util.StandardValidators;
+import org.apache.nifi.scheduling.SchedulingStrategy;
 import org.apache.nifi.ssl.SSLContextService;
 
 import java.util.ArrayList;
@@ -45,18 +47,19 @@ import java.util.Set;
 
 @Tags({"get", "tcp", "stream", "tls", "ssl"})
 @CapabilityDescription("Connects over TCP/TLS to the provided endpoint. Received data will be ungzipped and written as content to the FlowFile")
-@SeeAlso({})
+@DefaultSchedule(strategy = SchedulingStrategy.TIMER_DRIVEN, period = "10 sec")
 public class TCPClient extends AbstractSessionFactoryProcessor {
 	
 	
 	
 	private String host;
 	private int port;
-	private int receiveBufferSize;
+  	private String customText;
 	private int stx;	// start byte
   	private int etx;	// end byte
 	private int dle;	// escape byte
-  	private String credentials;
+	private int receiveBufferSize;
+	private int readSecondsTimeout;
   	private SSLContextService sslContextService;
   	private SendingReceivingClient client;
 	
@@ -128,6 +131,25 @@ public class TCPClient extends AbstractSessionFactoryProcessor {
             .addValidator(StandardValidators.DATA_SIZE_VALIDATOR)
             .build();
     
+    public static final PropertyDescriptor SECONDS_OF_INACTIVITY = new PropertyDescriptor.Builder()
+            .name("seconds-of-inactivity")
+            .displayName("Seconds of inactivity")
+            .description("")
+            .required(true)
+            .defaultValue("0")
+            .addValidator(StandardValidators.createLongValidator(-128, 127, true))
+            .build();
+    
+    public static final PropertyDescriptor READ_SECONDS_TIMEOUT = new PropertyDescriptor.Builder()
+            .name("read-seconds-tiemout")
+            .displayName("Read Seconds Timeout")
+            .description("Tiemout in seconds  without receiveing data. If this number is reached, " +
+            		"the connection is restablished. If it is 0, it is omitted")
+            .required(true)
+            .defaultValue("0")
+            .addValidator(StandardValidators.INTEGER_VALIDATOR)
+            .build();
+    
     public static final PropertyDescriptor SSL_CONTEXT_SERVICE = new PropertyDescriptor.Builder()
             .name("SSL Context Service")
             .description("The Controller Service to use in order to obtain an SSL Context. If this property is set, " +
@@ -161,6 +183,7 @@ public class TCPClient extends AbstractSessionFactoryProcessor {
         _propertyDescriptors.add(END_OF_MESSAGE_BYTE);
         _propertyDescriptors.add(ESCAPE_MESSAGE_BYTE);
         _propertyDescriptors.add(RECEIVE_BUFFER_SIZE);
+        _propertyDescriptors.add(READ_SECONDS_TIMEOUT);
         _propertyDescriptors.add(SSL_CONTEXT_SERVICE);
 
         DESCRIPTORS = Collections.unmodifiableList(_propertyDescriptors);
@@ -187,12 +210,13 @@ public class TCPClient extends AbstractSessionFactoryProcessor {
     public void onScheduled(final ProcessContext context) {
     	this.host = context.getProperty(HOSTNAME).getValue();
     	this.port = context.getProperty(PORT).asInteger();
-    	this.receiveBufferSize = context.getProperty(RECEIVE_BUFFER_SIZE).asDataSize(DataUnit.B).intValue();
+      	this.customText = context.getProperty(CUSTOM_TEXT).getValue();
     	this.stx = context.getProperty(START_OF_MESSAGE_BYTE).asInteger();
       	this.etx = context.getProperty(END_OF_MESSAGE_BYTE).asInteger();
       	this.dle = context.getProperty(ESCAPE_MESSAGE_BYTE).asInteger();
-      	this.credentials = context.getProperty(CUSTOM_TEXT).getValue();
-      	this.sslContextService = (SSLContextService) context.getProperty(SSL_CONTEXT_SERVICE).asControllerService();
+    	this.receiveBufferSize = context.getProperty(RECEIVE_BUFFER_SIZE).asDataSize(DataUnit.B).intValue();
+    	this.readSecondsTimeout = context.getProperty(READ_SECONDS_TIMEOUT).asInteger();
+    	this.sslContextService = (SSLContextService) context.getProperty(SSL_CONTEXT_SERVICE).asControllerService();
     }
 
     @Override
@@ -200,19 +224,23 @@ public class TCPClient extends AbstractSessionFactoryProcessor {
 
         if (this.client == null) {
         	this.client = new SendingReceivingClient(
-        			this.host, this.port, this.credentials, REL_SUCCESS,
+        			this.host, this.port, this.customText, this.readSecondsTimeout, REL_SUCCESS,
         			sessionFactory, this.sslContextService,
         			new MessageHandler(this.stx, this.etx, this.dle)
         			);
         	
         }
         this.client.start();
+        
+        
     }
     
     @OnStopped
     public void tearDown() {
     	this.client.stop();
     }
+    
+    
     
 
 }
