@@ -1,11 +1,8 @@
 package org.apache.nifi.processors.tcp.client;
 
-import java.io.ByteArrayInputStream;
-import java.io.IOException;
-import java.util.Arrays;
-import java.util.zip.GZIPInputStream;
 
-import org.apache.commons.lang3.ArrayUtils;
+import java.util.Arrays;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -77,31 +74,6 @@ public class MessageHandler {
     	}
     	return Arrays.copyOfRange(byteArrayOut, 0, o);
     }
-    
-    public String unGunzipFile(byte[] byteArray) {
-    	 
-        byte[] buffer = new byte[1024];
-        byte[] outByteArray = new byte[0];
- 
-        try {
-        	
-            GZIPInputStream gZIPInputStream = new GZIPInputStream(new ByteArrayInputStream(byteArray));
-            int bytes_read;
- 
-            while ((bytes_read = gZIPInputStream.read(buffer)) > 0) {
- 
-            	buffer = Arrays.copyOfRange(buffer, 0, bytes_read);
-           	 	outByteArray = ArrayUtils.addAll(outByteArray, buffer);
-            }
- 
-            gZIPInputStream.close();
-            return new String(outByteArray);
-        } catch (IOException ex) {
-            ex.printStackTrace();
-        }
-        return "Error";
-    }
-
 
 }
 

@@ -98,8 +98,7 @@ public class SendingReceivingClient {
                      }
                      byte[] packet = null;
                      while((packet = this.delegatingMessageHandler.popFromByteArray()) != null) {
-                     	String jsonString = this.delegatingMessageHandler.unGunzipFile(packet); 
-                         this.handle(jsonString);
+                         this.handle(packet);
                          
                      }
                 } catch (SocketTimeoutException e) {
@@ -147,13 +146,13 @@ public class SendingReceivingClient {
 		}
     }
     
-    public void handle(String message) {
+    public void handle(byte [] packet) {
         ProcessSession session = this.sessionFactory.createSession();
         FlowFile flowFile = session.create();
         flowFile = session.write(flowFile, new OutputStreamCallback() {
             @Override
             public void process(OutputStream out) throws IOException {
-                out.write(message.getBytes());
+                out.write(packet);
             }
         });
         session.transfer(flowFile, REL_SUCCESS);
