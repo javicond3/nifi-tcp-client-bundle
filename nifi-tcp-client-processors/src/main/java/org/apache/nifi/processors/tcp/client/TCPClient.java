@@ -216,10 +216,9 @@ public class TCPClient extends AbstractSessionFactoryProcessor {
 
     @Override
     public void onTrigger(ProcessContext context, ProcessSessionFactory sessionFactory) throws ProcessException {
-
         if (this.client == null) {
         	this.client = new SendingReceivingClient(
-        			this.host, this.port, this.customText, this.readSecondsTimeout, REL_SUCCESS,
+        			this.host, this.port, this.customText, this.readSecondsTimeout, this.receiveBufferSize, REL_SUCCESS,
         			sessionFactory, this.sslContextService,
         			new MessageHandler(this.stx, this.etx, this.dle)
         			);

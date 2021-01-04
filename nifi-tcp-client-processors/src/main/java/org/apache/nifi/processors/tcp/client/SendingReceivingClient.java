@@ -6,12 +6,12 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.SocketTimeoutException;
-import java.util.Arrays;
+import java.util.ArrayList;
+import java.util.List;
 
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLSocket;
 
-import org.apache.commons.lang3.ArrayUtils;
 import org.apache.nifi.flowfile.FlowFile;
 import org.apache.nifi.processor.ProcessSession;
 import org.apache.nifi.processor.ProcessSessionFactory;
@@ -29,6 +29,7 @@ public class SendingReceivingClient {
 	private final int port;
   	private final String customText;
   	private final int readSecondsTimeout;
+  	private final int receiveBufferSize;
   	private final Relationship REL_SUCCESS;
   	private final ProcessSessionFactory sessionFactory;
   	private final SSLContextService sslContextService;
@@ -36,12 +37,13 @@ public class SendingReceivingClient {
   	private volatile SSLSocket sslSocket;
   	private Thread threadClient; 
   	
-  	public SendingReceivingClient(String host, int port, String customText, int readSecondsTimeout,
+  	public SendingReceivingClient(String host, int port, String customText, int readSecondsTimeout, int receiveBufferSize,
   			Relationship REL_SUCCESS, ProcessSessionFactory sessionFactory, SSLContextService sslContextService, MessageHandler delegatingMessageHandler) {
   		this.host = host;
   		this.port = port;
   		this.customText = customText;
   		this.readSecondsTimeout = readSecondsTimeout;
+  		this.receiveBufferSize = receiveBufferSize;
   		this.REL_SUCCESS = REL_SUCCESS;
   		this.sessionFactory = sessionFactory;
   		this.sslContextService = sslContextService;
@@ -84,29 +86,40 @@ public class SendingReceivingClient {
             BufferedOutputStream bufferedOutputStream = new BufferedOutputStream(outputStream);
 
             bufferedOutputStream.write((this.customText.toString()+"\r\n").getBytes());
-            bufferedOutputStream.flush(); 
-            while (true && !this.sslSocket.isClosed()) {
-                byte[] buffer = new byte[40];
-                
-                try {
-                	 int bytesRead = bufferedInputStream.read(buffer);
-                	 buffer = Arrays.copyOfRange(buffer, 0, bytesRead);
-                     delegatingMessageHandler.byteArrayInput = ArrayUtils.addAll(delegatingMessageHandler.byteArrayInput, buffer);
-                     if(bytesRead < 0) {
-                     	this.stop();
-                     	return;
-                     }
-                     byte[] packet = null;
-                     while((packet = this.delegatingMessageHandler.popFromByteArray()) != null) {
-                         this.handle(packet);
-                         
-                     }
-                } catch (SocketTimeoutException e) {
+            bufferedOutputStream.flush();
+            
+			List<Byte> buffer = new ArrayList<Byte>();
+			while (!this.sslSocket.isClosed()) {
+				try {
+					int lastByte = bufferedInputStream.read();
+					buffer.add((byte)lastByte);
+					if (lastByte < 0) {
+						sslSocket.close();
+						return;
+					}
+					
+					if (buffer.size() >= receiveBufferSize) {
+	                    buffer.clear();
+					}
+					List<Byte>packet = this.delegatingMessageHandler.popPacketFromBuffer(buffer);
+					if (packet != null){
+						Byte[] packetArray = new Byte[packet.size()];
+						packet.toArray(packetArray);
+						byte[] packetArrayByte = new byte[packet.size()];
+						for(int i = 0; i<packet.size(); i++) {
+							packetArrayByte[i] = packetArray[i].byteValue();
+						}
+	                    this.handle(packetArrayByte);
+	                    buffer.clear();
+					}
+					
+				} catch (SocketTimeoutException e) {
 			           logger.error("Socket timed out", e);
 			           this.stop();
 			           return;
 			   }
-            }
+				
+			}
         } catch (IOException e) {
         	logger.error("Socket process error", e);
         } catch (Exception e) {
